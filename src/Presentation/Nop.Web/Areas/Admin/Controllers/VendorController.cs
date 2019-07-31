@@ -1,27 +1,24 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.Extensions.Primitives;
 using Nop.Core.Domain.Catalog;
-using Nop.Core.Domain.Directory;
+using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Vendors;
 using Nop.Services.Common;
 using Nop.Services.Customers;
-using Nop.Services.Directory;
-using Nop.Services.Helpers;
 using Nop.Services.Localization;
 using Nop.Services.Logging;
 using Nop.Services.Media;
+using Nop.Services.Messages;
 using Nop.Services.Security;
 using Nop.Services.Seo;
 using Nop.Services.Vendors;
-using Nop.Web.Areas.Admin.Extensions;
+using Nop.Web.Areas.Admin.Factories;
+using Nop.Web.Areas.Admin.Infrastructure.Mapper.Extensions;
 using Nop.Web.Areas.Admin.Models.Vendors;
 using Nop.Web.Framework.Controllers;
-using Nop.Web.Framework.Kendoui;
 using Nop.Web.Framework.Mvc;
 using Nop.Web.Framework.Mvc.Filters;
 
@@ -31,63 +28,54 @@ namespace Nop.Web.Areas.Admin.Controllers
     {
         #region Fields
 
-        private readonly ICustomerService _customerService;
-        private readonly ILocalizationService _localizationService;
-        private readonly IVendorService _vendorService;
-        private readonly IPermissionService _permissionService;
-        private readonly IUrlRecordService _urlRecordService;
-        private readonly ILanguageService _languageService;
-        private readonly ILocalizedEntityService _localizedEntityService;
-        private readonly IPictureService _pictureService;
-        private readonly IDateTimeHelper _dateTimeHelper;
-        private readonly VendorSettings _vendorSettings;
-        private readonly ICustomerActivityService _customerActivityService;
         private readonly IAddressService _addressService;
-        private readonly ICountryService _countryService;
-        private readonly IStateProvinceService _stateProvinceService;
+        private readonly ICustomerActivityService _customerActivityService;
+        private readonly ICustomerService _customerService;
         private readonly IGenericAttributeService _genericAttributeService;
+        private readonly ILocalizationService _localizationService;
+        private readonly ILocalizedEntityService _localizedEntityService;
+        private readonly INotificationService _notificationService;
+        private readonly IPermissionService _permissionService;
+        private readonly IPictureService _pictureService;
+        private readonly IUrlRecordService _urlRecordService;
         private readonly IVendorAttributeParser _vendorAttributeParser;
         private readonly IVendorAttributeService _vendorAttributeService;
+        private readonly IVendorModelFactory _vendorModelFactory;
+        private readonly IVendorService _vendorService;
 
         #endregion
 
         #region Ctor
 
-        public VendorController(ICustomerService customerService,
-            ILocalizationService localizationService,
-            IVendorService vendorService,
-            IPermissionService permissionService,
-            IUrlRecordService urlRecordService,
-            ILanguageService languageService,
-            ILocalizedEntityService localizedEntityService,
-            IPictureService pictureService,
-            IDateTimeHelper dateTimeHelper,
-            VendorSettings vendorSettings,
+        public VendorController(IAddressService addressService,
             ICustomerActivityService customerActivityService,
-            IAddressService addressService,
-            ICountryService countryService,
-            IStateProvinceService stateProvinceService,
+            ICustomerService customerService,
             IGenericAttributeService genericAttributeService,
+            ILocalizationService localizationService,
+            ILocalizedEntityService localizedEntityService,
+            INotificationService notificationService,
+            IPermissionService permissionService,
+            IPictureService pictureService,
+            IUrlRecordService urlRecordService,
             IVendorAttributeParser vendorAttributeParser,
-            IVendorAttributeService vendorAttributeService)
+            IVendorAttributeService vendorAttributeService,
+            IVendorModelFactory vendorModelFactory,
+            IVendorService vendorService)
         {
-            this._customerService = customerService;
-            this._localizationService = localizationService;
-            this._vendorService = vendorService;
-            this._permissionService = permissionService;
-            this._urlRecordService = urlRecordService;
-            this._languageService = languageService;
-            this._localizedEntityService = localizedEntityService;
-            this._pictureService = pictureService;
-            this._dateTimeHelper = dateTimeHelper;
-            this._vendorSettings = vendorSettings;
-            this._customerActivityService = customerActivityService;
-            this._addressService = addressService;
-            this._countryService = countryService;
-            this._stateProvinceService = stateProvinceService;
-            this._genericAttributeService = genericAttributeService;
-            this._vendorAttributeParser = vendorAttributeParser;
-            this._vendorAttributeService = vendorAttributeService;
+            _addressService = addressService;
+            _customerActivityService = customerActivityService;
+            _customerService = customerService;
+            _genericAttributeService = genericAttributeService;
+            _localizationService = localizationService;
+            _localizedEntityService = localizedEntityService;
+            _notificationService = notificationService;
+            _permissionService = permissionService;
+            _pictureService = pictureService;
+            _urlRecordService = urlRecordService;
+            _vendorAttributeParser = vendorAttributeParser;
+            _vendorAttributeService = vendorAttributeService;
+            _vendorModelFactory = vendorModelFactory;
+            _vendorService = vendorService;
         }
 
         #endregion
@@ -131,153 +119,8 @@ namespace Nop.Web.Areas.Admin.Controllers
                     localized.LanguageId);
 
                 //search engine name
-                var seName = vendor.ValidateSeName(localized.SeName, localized.Name, false);
+                var seName = _urlRecordService.ValidateSeName(vendor, localized.SeName, localized.Name, false);
                 _urlRecordService.SaveSlug(vendor, seName, localized.LanguageId);
-            }
-        }
-
-        protected virtual void PrepareVendorModel(VendorModel model, Vendor vendor, bool excludeProperties, bool prepareEntireAddressModel)
-        {
-            if (model == null)
-                throw new ArgumentNullException(nameof(model));
-
-            var address = _addressService.GetAddressById(vendor != null ? vendor.AddressId : 0);
-
-            if (vendor != null)
-            {
-                if (!excludeProperties)
-                {
-                    if (address != null)
-                    {
-                        model.Address = address.ToModel();
-                    }
-                }
-
-                //associated customer emails
-                model.AssociatedCustomers = _customerService
-                    .GetAllCustomers(vendorId: vendor.Id)
-                    .Select(c => new VendorModel.AssociatedCustomerInfo()
-                    {
-                        Id = c.Id,
-                        Email = c.Email
-                    })
-                    .ToList();
-            }
-
-            //vendor attributes
-            PrepareVendorAttributesModel(model, vendor);
-
-            if (prepareEntireAddressModel)
-            {
-                model.Address.CountryEnabled = true;
-                model.Address.StateProvinceEnabled = true;
-                model.Address.CountyEnabled = true;
-                model.Address.CityEnabled = true;
-                model.Address.StreetAddressEnabled = true;
-                model.Address.StreetAddress2Enabled = true;
-                model.Address.ZipPostalCodeEnabled = true;
-                model.Address.PhoneEnabled = true;
-                model.Address.FaxEnabled = true;
-
-                //address
-                model.Address.AvailableCountries.Add(new SelectListItem { Text = _localizationService.GetResource("Admin.Address.SelectCountry"), Value = "0" });
-                foreach (var c in _countryService.GetAllCountries(showHidden: true))
-                    model.Address.AvailableCountries.Add(new SelectListItem { Text = c.Name, Value = c.Id.ToString(), Selected = (address != null && c.Id == address.CountryId) });
-
-                var states = model.Address.CountryId.HasValue ? _stateProvinceService.GetStateProvincesByCountryId(model.Address.CountryId.Value, showHidden: true).ToList() : new List<StateProvince>();
-                if (states.Any())
-                {
-                    foreach (var s in states)
-                        model.Address.AvailableStates.Add(new SelectListItem { Text = s.Name, Value = s.Id.ToString(), Selected = (address != null && s.Id == address.StateProvinceId) });
-                }
-                else
-                    model.Address.AvailableStates.Add(new SelectListItem { Text = _localizationService.GetResource("Admin.Address.OtherNonUS"), Value = "0" });
-            }
-        }
-
-        protected virtual void PrepareVendorAttributesModel(VendorModel model, Vendor vendor)
-        {
-            var vendorAttributes = _vendorAttributeService.GetAllVendorAttributes();
-            foreach (var attribute in vendorAttributes)
-            {
-                var attributeModel = new VendorModel.VendorAttributeModel
-                {
-                    Id = attribute.Id,
-                    Name = attribute.Name,
-                    IsRequired = attribute.IsRequired,
-                    AttributeControlType = attribute.AttributeControlType,
-                };
-
-                if (attribute.ShouldHaveValues())
-                {
-                    //values
-                    var attributeValues = _vendorAttributeService.GetVendorAttributeValues(attribute.Id);
-                    foreach (var attributeValue in attributeValues)
-                    {
-                        var attributeValueModel = new VendorModel.VendorAttributeValueModel
-                        {
-                            Id = attributeValue.Id,
-                            Name = attributeValue.Name,
-                            IsPreSelected = attributeValue.IsPreSelected
-                        };
-                        attributeModel.Values.Add(attributeValueModel);
-                    }
-                }
-
-
-                //set already selected attributes
-                if (vendor != null)
-                {
-                    var selectedVendorAttributes = vendor.GetAttribute<string>(VendorAttributeNames.VendorAttributes, _genericAttributeService);
-                    switch (attribute.AttributeControlType)
-                    {
-                        case AttributeControlType.DropdownList:
-                        case AttributeControlType.RadioList:
-                        case AttributeControlType.Checkboxes:
-                            {
-                                if (!string.IsNullOrEmpty(selectedVendorAttributes))
-                                {
-                                    //clear default selection
-                                    foreach (var item in attributeModel.Values)
-                                        item.IsPreSelected = false;
-
-                                    //select new values
-                                    var selectedValues = _vendorAttributeParser.ParseVendorAttributeValues(selectedVendorAttributes);
-                                    foreach (var attributeValue in selectedValues)
-                                        foreach (var item in attributeModel.Values)
-                                            if (attributeValue.Id == item.Id)
-                                                item.IsPreSelected = true;
-                                }
-                            }
-                            break;
-                        case AttributeControlType.ReadonlyCheckboxes:
-                            {
-                                //do nothing
-                                //values are already pre-set
-                            }
-                            break;
-                        case AttributeControlType.TextBox:
-                        case AttributeControlType.MultilineTextbox:
-                            {
-                                if (!string.IsNullOrEmpty(selectedVendorAttributes))
-                                {
-                                    var enteredText = _vendorAttributeParser.ParseValues(selectedVendorAttributes, attribute.Id);
-                                    if (enteredText.Any())
-                                        attributeModel.DefaultValue = enteredText[0];
-                                }
-                            }
-                            break;
-                        case AttributeControlType.Datepicker:
-                        case AttributeControlType.ColorSquares:
-                        case AttributeControlType.ImageSquares:
-                        case AttributeControlType.FileUpload:
-                        default:
-                            //not supported attribute control types
-                            break;
-                    }
-                }
-
-                model.VendorAttributes.Add(attributeModel);
             }
         }
 
@@ -286,66 +129,63 @@ namespace Nop.Web.Areas.Admin.Controllers
             if (form == null)
                 throw new ArgumentNullException(nameof(form));
 
-            var attributesXml = "";
+            var attributesXml = string.Empty;
             var vendorAttributes = _vendorAttributeService.GetAllVendorAttributes();
             foreach (var attribute in vendorAttributes)
             {
-                var controlId = $"vendor_attribute_{attribute.Id}";
+                var controlId = $"{NopAttributePrefixDefaults.Vendor}{attribute.Id}";
+                StringValues ctrlAttributes;
                 switch (attribute.AttributeControlType)
                 {
                     case AttributeControlType.DropdownList:
                     case AttributeControlType.RadioList:
+                        ctrlAttributes = form[controlId];
+                        if (!StringValues.IsNullOrEmpty(ctrlAttributes))
                         {
-                            var ctrlAttributes = form[controlId];
-                            if (!StringValues.IsNullOrEmpty(ctrlAttributes))
+                            var selectedAttributeId = int.Parse(ctrlAttributes);
+                            if (selectedAttributeId > 0)
+                                attributesXml = _vendorAttributeParser.AddVendorAttribute(attributesXml,
+                                    attribute, selectedAttributeId.ToString());
+                        }
+
+                        break;
+                    case AttributeControlType.Checkboxes:
+                        var cblAttributes = form[controlId];
+                        if (!StringValues.IsNullOrEmpty(cblAttributes))
+                        {
+                            foreach (var item in cblAttributes.ToString().Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
                             {
-                                var selectedAttributeId = int.Parse(ctrlAttributes);
+                                var selectedAttributeId = int.Parse(item);
                                 if (selectedAttributeId > 0)
                                     attributesXml = _vendorAttributeParser.AddVendorAttribute(attributesXml,
                                         attribute, selectedAttributeId.ToString());
                             }
                         }
-                        break;
-                    case AttributeControlType.Checkboxes:
-                        {
-                            var cblAttributes = form[controlId];
-                            if (!StringValues.IsNullOrEmpty(cblAttributes))
-                            {
-                                foreach (var item in cblAttributes.ToString().Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
-                                {
-                                    var selectedAttributeId = int.Parse(item);
-                                    if (selectedAttributeId > 0)
-                                        attributesXml = _vendorAttributeParser.AddVendorAttribute(attributesXml,
-                                            attribute, selectedAttributeId.ToString());
-                                }
-                            }
-                        }
+
                         break;
                     case AttributeControlType.ReadonlyCheckboxes:
+                        //load read-only (already server-side selected) values
+                        var attributeValues = _vendorAttributeService.GetVendorAttributeValues(attribute.Id);
+                        foreach (var selectedAttributeId in attributeValues
+                            .Where(v => v.IsPreSelected)
+                            .Select(v => v.Id)
+                            .ToList())
                         {
-                            //load read-only (already server-side selected) values
-                            var attributeValues = _vendorAttributeService.GetVendorAttributeValues(attribute.Id);
-                            foreach (var selectedAttributeId in attributeValues
-                                .Where(v => v.IsPreSelected)
-                                .Select(v => v.Id)
-                                .ToList())
-                            {
-                                attributesXml = _vendorAttributeParser.AddVendorAttribute(attributesXml,
-                                            attribute, selectedAttributeId.ToString());
-                            }
+                            attributesXml = _vendorAttributeParser.AddVendorAttribute(attributesXml,
+                                attribute, selectedAttributeId.ToString());
                         }
+
                         break;
                     case AttributeControlType.TextBox:
                     case AttributeControlType.MultilineTextbox:
+                        ctrlAttributes = form[controlId];
+                        if (!StringValues.IsNullOrEmpty(ctrlAttributes))
                         {
-                            var ctrlAttributes = form[controlId];
-                            if (!StringValues.IsNullOrEmpty(ctrlAttributes))
-                            {
-                                var enteredText = ctrlAttributes.ToString().Trim();
-                                attributesXml = _vendorAttributeParser.AddVendorAttribute(attributesXml,
-                                    attribute, enteredText);
-                            }
+                            var enteredText = ctrlAttributes.ToString().Trim();
+                            attributesXml = _vendorAttributeParser.AddVendorAttribute(attributesXml,
+                                attribute, enteredText);
                         }
+
                         break;
                     case AttributeControlType.Datepicker:
                     case AttributeControlType.ColorSquares:
@@ -364,7 +204,6 @@ namespace Nop.Web.Areas.Admin.Controllers
 
         #region Vendors
 
-        //list
         public virtual IActionResult Index()
         {
             return RedirectToAction("List");
@@ -375,68 +214,50 @@ namespace Nop.Web.Areas.Admin.Controllers
             if (!_permissionService.Authorize(StandardPermissionProvider.ManageVendors))
                 return AccessDeniedView();
 
-            var model = new VendorListModel();
+            //prepare model
+            var model = _vendorModelFactory.PrepareVendorSearchModel(new VendorSearchModel());
+
             return View(model);
         }
 
         [HttpPost]
-        public virtual IActionResult List(DataSourceRequest command, VendorListModel model)
+        public virtual IActionResult List(VendorSearchModel searchModel)
         {
             if (!_permissionService.Authorize(StandardPermissionProvider.ManageVendors))
-                return AccessDeniedKendoGridJson();
+                return AccessDeniedDataTablesJson();
 
-            var vendors = _vendorService.GetAllVendors(model.SearchName, command.Page - 1, command.PageSize, true);
-            var gridModel = new DataSourceResult
-            {
-                Data = vendors.Select(x =>
-                {
-                    var vendorModel = x.ToModel();
-                    PrepareVendorModel(vendorModel, x, false, false);
-                    return vendorModel;
-                }),
-                Total = vendors.TotalCount,
-            };
+            //prepare model
+            var model = _vendorModelFactory.PrepareVendorListModel(searchModel);
 
-            return Json(gridModel);
+            return Json(model);
         }
 
-        //create
         public virtual IActionResult Create()
         {
             if (!_permissionService.Authorize(StandardPermissionProvider.ManageVendors))
                 return AccessDeniedView();
 
+            //prepare model
+            var model = _vendorModelFactory.PrepareVendorModel(new VendorModel(), null);
 
-            var model = new VendorModel();
-            PrepareVendorModel(model, null, false, true);
-            //locales
-            AddLocales(_languageService, model.Locales);
-            //default values
-            model.PageSize = 6;
-            model.Active = true;
-            model.AllowCustomersToSelectPageSize = true;
-            model.PageSizeOptions = _vendorSettings.DefaultVendorPageSizeOptions;
-
-            //default value
-            model.Active = true;
             return View(model);
         }
 
         [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
         [FormValueRequired("save", "save-continue")]
-        public virtual IActionResult Create(VendorModel model, bool continueEditing)
+        public virtual IActionResult Create(VendorModel model, bool continueEditing, IFormCollection form)
         {
             if (!_permissionService.Authorize(StandardPermissionProvider.ManageVendors))
                 return AccessDeniedView();
 
             //parse vendor attributes
-            var vendorAttributesXml = ParseVendorAttributes(model.Form);
+            var vendorAttributesXml = ParseVendorAttributes(form);
             _vendorAttributeParser.GetAttributeWarnings(vendorAttributesXml).ToList()
                 .ForEach(warning => ModelState.AddModelError(string.Empty, warning));
 
             if (ModelState.IsValid)
             {
-                var vendor = model.ToEntity();
+                var vendor = model.ToEntity<Vendor>();
                 _vendorService.InsertVendor(vendor);
 
                 //activity log
@@ -444,12 +265,13 @@ namespace Nop.Web.Areas.Admin.Controllers
                     string.Format(_localizationService.GetResource("ActivityLog.AddNewVendor"), vendor.Id), vendor);
 
                 //search engine name
-                model.SeName = vendor.ValidateSeName(model.SeName, vendor.Name, true);
+                model.SeName = _urlRecordService.ValidateSeName(vendor, model.SeName, vendor.Name, true);
                 _urlRecordService.SaveSlug(vendor, model.SeName, 0);
 
                 //address
-                var address = model.Address.ToEntity();
+                var address = model.Address.ToEntity<Address>();
                 address.CreatedOnUtc = DateTime.UtcNow;
+
                 //some validation
                 if (address.CountryId == 0)
                     address.CountryId = null;
@@ -460,70 +282,58 @@ namespace Nop.Web.Areas.Admin.Controllers
                 _vendorService.UpdateVendor(vendor);
 
                 //vendor attributes
-                _genericAttributeService.SaveAttribute(vendor, VendorAttributeNames.VendorAttributes, vendorAttributesXml);
+                _genericAttributeService.SaveAttribute(vendor, NopVendorDefaults.VendorAttributes, vendorAttributesXml);
 
                 //locales
                 UpdateLocales(vendor, model);
+
                 //update picture seo file name
                 UpdatePictureSeoNames(vendor);
 
-                SuccessNotification(_localizationService.GetResource("Admin.Vendors.Added"));
+                _notificationService.SuccessNotification(_localizationService.GetResource("Admin.Vendors.Added"));
 
-                if (continueEditing)
-                {
-                    //selected tab
-                    SaveSelectedTabName();
-
-                    return RedirectToAction("Edit", new { id = vendor.Id });
-                }
-                return RedirectToAction("List");
+                if (!continueEditing)
+                    return RedirectToAction("List");
+                
+                return RedirectToAction("Edit", new { id = vendor.Id });
             }
 
-            //If we got this far, something failed, redisplay form
-            PrepareVendorModel(model, null, true, true);
+            //prepare model
+            model = _vendorModelFactory.PrepareVendorModel(model, null, true);
+
+            //if we got this far, something failed, redisplay form
             return View(model);
         }
 
-        //edit
         public virtual IActionResult Edit(int id)
         {
             if (!_permissionService.Authorize(StandardPermissionProvider.ManageVendors))
                 return AccessDeniedView();
 
+            //try to get a vendor with the specified id
             var vendor = _vendorService.GetVendorById(id);
             if (vendor == null || vendor.Deleted)
-                //No vendor found with the specified id
                 return RedirectToAction("List");
 
-            var model = vendor.ToModel();
-            PrepareVendorModel(model, vendor, false, true);
-            //locales
-            AddLocales(_languageService, model.Locales, (locale, languageId) =>
-            {
-                locale.Name = vendor.GetLocalized(x => x.Name, languageId, false, false);
-                locale.Description = vendor.GetLocalized(x => x.Description, languageId, false, false);
-                locale.MetaKeywords = vendor.GetLocalized(x => x.MetaKeywords, languageId, false, false);
-                locale.MetaDescription = vendor.GetLocalized(x => x.MetaDescription, languageId, false, false);
-                locale.MetaTitle = vendor.GetLocalized(x => x.MetaTitle, languageId, false, false);
-                locale.SeName = vendor.GetSeName(languageId, false, false);
-            });
+            //prepare model
+            var model = _vendorModelFactory.PrepareVendorModel(null, vendor);
 
             return View(model);
         }
 
         [HttpPost, ParameterBasedOnFormName("save-continue", "continueEditing")]
-        public virtual IActionResult Edit(VendorModel model, bool continueEditing)
+        public virtual IActionResult Edit(VendorModel model, bool continueEditing, IFormCollection form)
         {
             if (!_permissionService.Authorize(StandardPermissionProvider.ManageVendors))
                 return AccessDeniedView();
 
+            //try to get a vendor with the specified id
             var vendor = _vendorService.GetVendorById(model.Id);
             if (vendor == null || vendor.Deleted)
-                //No vendor found with the specified id
                 return RedirectToAction("List");
 
             //parse vendor attributes
-            var vendorAttributesXml = ParseVendorAttributes(model.Form);
+            var vendorAttributesXml = ParseVendorAttributes(form);
             _vendorAttributeParser.GetAttributeWarnings(vendorAttributesXml).ToList()
                 .ForEach(warning => ModelState.AddModelError(string.Empty, warning));
 
@@ -534,22 +344,23 @@ namespace Nop.Web.Areas.Admin.Controllers
                 _vendorService.UpdateVendor(vendor);
 
                 //vendor attributes
-                _genericAttributeService.SaveAttribute(vendor, VendorAttributeNames.VendorAttributes, vendorAttributesXml);
+                _genericAttributeService.SaveAttribute(vendor, NopVendorDefaults.VendorAttributes, vendorAttributesXml);
 
                 //activity log
                 _customerActivityService.InsertActivity("EditVendor",
                     string.Format(_localizationService.GetResource("ActivityLog.EditVendor"), vendor.Id), vendor);
 
                 //search engine name
-                model.SeName = vendor.ValidateSeName(model.SeName, vendor.Name, true);
+                model.SeName = _urlRecordService.ValidateSeName(vendor, model.SeName, vendor.Name, true);
                 _urlRecordService.SaveSlug(vendor, model.SeName, 0);
 
                 //address
                 var address = _addressService.GetAddressById(vendor.AddressId);
                 if (address == null)
                 {
-                    address = model.Address.ToEntity();
+                    address = model.Address.ToEntity<Address>();
                     address.CreatedOnUtc = DateTime.UtcNow;
+
                     //some validation
                     if (address.CountryId == 0)
                         address.CountryId = null;
@@ -563,6 +374,7 @@ namespace Nop.Web.Areas.Admin.Controllers
                 else
                 {
                     address = model.Address.ToEntity(address);
+
                     //some validation
                     if (address.CountryId == 0)
                         address.CountryId = null;
@@ -572,9 +384,9 @@ namespace Nop.Web.Areas.Admin.Controllers
                     _addressService.UpdateAddress(address);
                 }
 
-
                 //locales
                 UpdateLocales(vendor, model);
+
                 //delete an old picture (if deleted or updated)
                 if (prevPictureId > 0 && prevPictureId != vendor.PictureId)
                 {
@@ -585,33 +397,30 @@ namespace Nop.Web.Areas.Admin.Controllers
                 //update picture seo file name
                 UpdatePictureSeoNames(vendor);
 
-                SuccessNotification(_localizationService.GetResource("Admin.Vendors.Updated"));
-                if (continueEditing)
-                {
-                    //selected tab
-                    SaveSelectedTabName();
+                _notificationService.SuccessNotification(_localizationService.GetResource("Admin.Vendors.Updated"));
 
-                    return RedirectToAction("Edit",  new {id = vendor.Id});
-                }
-                return RedirectToAction("List");
+                if (!continueEditing)
+                    return RedirectToAction("List");
+                
+                return RedirectToAction("Edit", new { id = vendor.Id });
             }
 
-            //If we got this far, something failed, redisplay form
-            PrepareVendorModel(model, vendor, true, true);
+            //prepare model
+            model = _vendorModelFactory.PrepareVendorModel(model, vendor, true);
 
+            //if we got this far, something failed, redisplay form
             return View(model);
         }
 
-        //delete
         [HttpPost]
         public virtual IActionResult Delete(int id)
         {
             if (!_permissionService.Authorize(StandardPermissionProvider.ManageVendors))
                 return AccessDeniedView();
 
+            //try to get a vendor with the specified id
             var vendor = _vendorService.GetVendorById(id);
             if (vendor == null)
-                //No vendor found with the specified id
                 return RedirectToAction("List");
 
             //clear associated customer references
@@ -629,7 +438,8 @@ namespace Nop.Web.Areas.Admin.Controllers
             _customerActivityService.InsertActivity("DeleteVendor",
                 string.Format(_localizationService.GetResource("ActivityLog.DeleteVendor"), vendor.Id), vendor);
 
-            SuccessNotification(_localizationService.GetResource("Admin.Vendors.Deleted"));
+            _notificationService.SuccessNotification(_localizationService.GetResource("Admin.Vendors.Deleted"));
+
             return RedirectToAction("List");
         }
 
@@ -638,35 +448,19 @@ namespace Nop.Web.Areas.Admin.Controllers
         #region Vendor notes
 
         [HttpPost]
-        public virtual IActionResult VendorNotesSelect(int vendorId, DataSourceRequest command)
+        public virtual IActionResult VendorNotesSelect(VendorNoteSearchModel searchModel)
         {
             if (!_permissionService.Authorize(StandardPermissionProvider.ManageVendors))
-                return AccessDeniedKendoGridJson();
+                return AccessDeniedDataTablesJson();
 
-            var vendor = _vendorService.GetVendorById(vendorId);
-            if (vendor == null)
-                throw new ArgumentException("No vendor found with the specified id");
+            //try to get a vendor with the specified id
+            var vendor = _vendorService.GetVendorById(searchModel.VendorId)
+                ?? throw new ArgumentException("No vendor found with the specified id");
 
-            var vendorNoteModels = new List<VendorModel.VendorNote>();
-            foreach (var vendorNote in vendor.VendorNotes
-                .OrderByDescending(vn => vn.CreatedOnUtc))
-            {
-                vendorNoteModels.Add(new VendorModel.VendorNote
-                {
-                    Id = vendorNote.Id,
-                    VendorId = vendorNote.VendorId,
-                    Note = vendorNote.FormatVendorNoteText(),
-                    CreatedOn = _dateTimeHelper.ConvertToUserTime(vendorNote.CreatedOnUtc, DateTimeKind.Utc)
-                });
-            }
+            //prepare model
+            var model = _vendorModelFactory.PrepareVendorNoteListModel(searchModel, vendor);
 
-            var gridModel = new DataSourceResult
-            {
-                Data = vendorNoteModels,
-                Total = vendorNoteModels.Count
-            };
-
-            return Json(gridModel);
+            return Json(model);
         }
 
         public virtual IActionResult VendorNoteAdd(int vendorId, string message)
@@ -674,19 +468,23 @@ namespace Nop.Web.Areas.Admin.Controllers
             if (!_permissionService.Authorize(StandardPermissionProvider.ManageVendors))
                 return AccessDeniedView();
 
+            //try to get a vendor with the specified id
             var vendor = _vendorService.GetVendorById(vendorId);
             if (vendor == null)
-                return Json(new {Result = false});
+                return ErrorJson("Vendor cannot be loaded");
+
+            if (string.IsNullOrEmpty(message))
+                return ErrorJson(_localizationService.GetResource("Admin.Vendors.VendorNotes.Fields.Note.Validation"));
 
             var vendorNote = new VendorNote
             {
                 Note = message,
-                CreatedOnUtc = DateTime.UtcNow,
+                CreatedOnUtc = DateTime.UtcNow
             };
             vendor.VendorNotes.Add(vendorNote);
             _vendorService.UpdateVendor(vendor);
 
-            return Json(new {Result = true});
+            return Json(new { Result = true });
         }
 
         [HttpPost]
@@ -695,13 +493,14 @@ namespace Nop.Web.Areas.Admin.Controllers
             if (!_permissionService.Authorize(StandardPermissionProvider.ManageVendors))
                 return AccessDeniedView();
 
-            var vendor = _vendorService.GetVendorById(vendorId);
-            if (vendor == null)
-                throw new ArgumentException("No vendor found with the specified id");
+            //try to get a vendor with the specified id
+            var vendor = _vendorService.GetVendorById(vendorId)
+                ?? throw new ArgumentException("No vendor found with the specified id", nameof(vendorId));
 
-            var vendorNote = vendor.VendorNotes.FirstOrDefault(vn => vn.Id == id);
-            if (vendorNote == null)
-                throw new ArgumentException("No vendor note found with the specified id");
+            //try to get a vendor note with the specified id
+            var vendorNote = vendor.VendorNotes.FirstOrDefault(vn => vn.Id == id)
+                ?? throw new ArgumentException("No vendor note found with the specified id", nameof(id));
+
             _vendorService.DeleteVendorNote(vendorNote);
 
             return new NullJsonResult();

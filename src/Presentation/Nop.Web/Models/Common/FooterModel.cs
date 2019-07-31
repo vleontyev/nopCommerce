@@ -1,5 +1,5 @@
 ﻿using System.Collections.Generic;
-using Nop.Web.Framework.Mvc.Models;
+using Nop.Web.Framework.Models;
 
 namespace Nop.Web.Models.Common
 {
@@ -21,6 +21,7 @@ namespace Nop.Web.Models.Common
         public bool RecentlyViewedProductsEnabled { get; set; }
         public bool NewProductsEnabled { get; set; }
         public bool AllowCustomersToApplyForVendorAccount { get; set; }
+        public bool AllowCustomersToCheckGiftCardBalance { get; set; }
         public bool DisplayTaxShippingInfoFooter { get; set; }
         public bool HidePoweredByNopCommerce { get; set; }
 
@@ -42,7 +43,7 @@ namespace Nop.Web.Models.Common
         public bool DisplayCustomerAddressesFooterItem { get; set; }
         public bool DisplayShoppingCartFooterItem { get; set; }
         public bool DisplayWishlistFooterItem { get; set; }
-        public bool DisplayApplyVendorAccountFooterItem { get; set; }
+        public bool DisplayApplyVendorAccountFooterItem { get; set; }        
 
         #region Nested classes
 
